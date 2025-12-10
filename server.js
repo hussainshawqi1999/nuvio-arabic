@@ -108,4 +108,12 @@ if (process.env.VERCEL) {
     module.exports = app;
 } else {
     app.listen(port, () => console.log(`🚀 Addon running on port ${port}`));
+
+}
+// في نهاية ملف server.js
+const port = process.env.PORT || 7000;
+if (process.env.VERCEL) {
+    module.exports = app;
+} else {
+    app.listen(port, () => console.log(`🚀 Addon running on port ${port}`));
 }
