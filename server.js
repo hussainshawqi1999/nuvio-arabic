@@ -4,28 +4,26 @@ const cors = require('cors');
 const axios = require('axios');
 const path = require('path');
 
-// استيراد المزودات (تأكد أن الملفات موجودة في مجلد providers)
-// نستخدم try-catch لتجنب انهيار السيرفر إذا كان الملف ناقصاً
+// محاولة استيراد المزودات بأمان
 let wecima = null;
 let fasel = null;
 try {
     wecima = require('./providers/wecima_pro');
     fasel = require('./providers/fasel_pro');
 } catch (e) {
-    console.error("⚠️ Error loading providers:", e.message);
+    console.error("⚠️ Provider import error:", e.message);
 }
 
 const app = express();
 app.use(cors());
 
-// مفتاح TMDB (استخدمنا المفتاح العام الموجود في ملفاتك)
 const TMDB_KEY = "439c478a771f35c05022f9feabcca01c"; 
 
 const builder = new addonBuilder({
-    id: "org.nuvio.arabic.gold",
-    version: "2.0.1", // تحديث النسخة
-    name: "Nuvio Arabic (Gold)",
-    description: "أفضل محتوى عربي (WeCima + FaselHD)",
+    id: "org.nuvio.arabic.fast",
+    version: "2.0.5", 
+    name: "Nuvio Arabic (Fast)",
+    description: "مسلسلات وأفلام عربية (Fast Timeout)",
     resources: ["catalog", "stream"],
     types: ["movie", "series"],
     idPrefixes: ["tt", "tmdb"],
@@ -35,14 +33,13 @@ const builder = new addonBuilder({
     ]
 });
 
-// 1. الكتالوج (جلب المحتوى العربي فقط من TMDB)
+// 1. الكتالوج
 builder.defineCatalogHandler(async ({ type, id }) => {
     const tmdbType = type === 'series' ? 'tv' : 'movie';
-    // طلب المحتوى الذي لغته الأصلية عربية (ar)
     const url = `https://api.themoviedb.org/3/discover/${tmdbType}?api_key=${TMDB_KEY}&with_original_language=ar&sort_by=popularity.desc&page=1`;
     
     try {
-        const { data } = await axios.get(url);
+        const { data } = await axios.get(url, { timeout: 5000 }); // مهلة قصيرة للكتالوج
         const metas = data.results.map(item => ({
             id: `tmdb:${item.id}`,
             type: type,
@@ -58,102 +55,103 @@ builder.defineCatalogHandler(async ({ type, id }) => {
     }
 });
 
-// 2. التشغيل (البحث في المصادر العربية)
+// دالة مساعدة لعمل timeout لأي Promise
+const withTimeout = (millis, promise) => {
+    const timeout = new Promise((resolve, reject) =>
+        setTimeout(() => resolve(null), millis) // يرجع null إذا انتهى الوقت
+    );
+    return Promise.race([promise, timeout]);
+};
+
+// 2. التشغيل (مع حماية الزمن)
 builder.defineStreamHandler(async ({ type, id }) => {
-    console.log(`🚀 Requesting stream for: ${type} ${id}`);
+    console.log(`🚀 Requesting: ${type} ${id}`);
     
     let tmdbId = id;
     let season = 1;
     let episode = 1;
 
-    // استخراج معرف TMDB وتفاصيل الحلقة
-    if (id.startsWith('tmdb:')) {
-        tmdbId = id.split(':')[1];
-    } 
-    
-    // دعم معرفات IMDB (tt...) بتحويلها لـ TMDB (اختياري، للتبسيط سنعتمد على الاسم)
+    if (id.startsWith('tmdb:')) tmdbId = id.split(':')[1];
     
     if (type === 'series' && id.includes(':')) {
         const parts = id.split(':');
-        tmdbId = parts[1]; // في حالة tmdb:123:1:1
+        tmdbId = parts[1];
         season = parseInt(parts[2]);
         episode = parseInt(parts[3]);
     }
 
-    // جلب الاسم العربي للبحث
     let queryName = "";
     try {
         const tmdbType = type === 'series' ? 'tv' : 'movie';
-        // نجلب التفاصيل باللغة العربية
         const url = `https://api.themoviedb.org/3/${tmdbType}/${tmdbId}?api_key=${TMDB_KEY}&language=ar-SA`;
-        const { data } = await axios.get(url);
+        // نعطي مهلة 3 ثواني فقط لجلب الاسم
+        const { data } = await axios.get(url, { timeout: 3000 });
         queryName = data.original_name || data.original_title || data.name || data.title;
-        console.log(`🔎 Searching for: ${queryName} (S${season} E${episode})`);
+        console.log(`🔎 Searching: ${queryName}`);
     } catch (e) { 
-        console.error("TMDB Details Error:", e.message);
         return { streams: [] }; 
     }
 
     const streams = [];
 
-    // محاولة الجلب من المزودات (بشكل متوازي لسرعة أكبر)
-    const promises = [];
+    // نجهز وعود البحث (Search Promises)
+    const searchPromises = [];
 
-    // 1. فاصل إعلاني (جودة عالية)
+    // إضافة فاصل إعلاني (مع مهلة داخلية 6 ثواني)
     if (fasel) {
-        promises.push(fasel.getStream(queryName, type, season, episode).then(stream => {
-            if (stream) streams.push(stream);
-        }).catch(e => console.error("Fasel Error:", e.message)));
+        searchPromises.push(
+            withTimeout(6000, fasel.getStream(queryName, type, season, episode))
+                .then(res => res ? streams.push(res) : console.log("Fasel timed out or failed"))
+                .catch(e => console.log("Fasel Error"))
+        );
     }
 
-    // 2. وي سيما (مكتبة ضخمة)
+    // إضافة وي سيما (مع مهلة داخلية 6 ثواني)
     if (wecima) {
-        promises.push(wecima.getStream(queryName, type, season, episode).then(stream => {
-            if (stream) streams.push(stream);
-        }).catch(e => console.error("WeCima Error:", e.message)));
+        searchPromises.push(
+            withTimeout(6000, wecima.getStream(queryName, type, season, episode))
+                .then(res => res ? streams.push(res) : console.log("WeCima timed out or failed"))
+                .catch(e => console.log("WeCima Error"))
+        );
     }
 
-    await Promise.all(promises);
+    // ننتظر الجميع بحد أقصى 7 ثواني (أقل من حد فيرسل الـ 10 ثواني)
+    await Promise.all(searchPromises);
 
-    // ترتيب النتائج (نفضل 1080p)
-    streams.sort((a, b) => (b.title.includes('1080') ? 1 : 0) - (a.title.includes('1080') ? 1 : 0));
+    // إذا لم نجد أي روابط، نضيف رابط "وهمي" ليخبر المستخدم
+    if (streams.length === 0) {
+        streams.push({
+            name: "Nuvio Arabic",
+            title: "No streams found / Blocked by Vercel",
+            url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", // رابط يوتيوب عشوائي
+            behaviorHints: { notWebReady: true }
+        });
+    }
 
     return { streams };
 });
 
 const addonInterface = builder.getInterface();
 
-// إعدادات Express لـ Vercel
-app.get('/', (req, res) => {
-    res.redirect('/manifest.json');
-});
-
+app.get('/', (req, res) => res.redirect('/manifest.json'));
 app.get('/manifest.json', (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json(addonInterface.manifest);
 });
-
 app.get('/catalog/:type/:id.json', async (req, res) => {
     const resp = await addonInterface.catalog(req.params);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json(resp);
 });
-
 app.get('/stream/:type/:id.json', async (req, res) => {
     const resp = await addonInterface.stream(req.params);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json(resp);
 });
 
-// هذا الجزء هو الأهم لـ Vercel Serverless Function
 const port = process.env.PORT || 7000;
-
-// إذا كنا في بيئة Vercel، نقوم بتصدير التطبيق بدلاً من تشغيله
 if (process.env.VERCEL) {
     module.exports = app;
 } else {
-    // إذا كنا محلياً، نقوم بتشغيل السيرفر
-    app.listen(port, () => {
-        console.log(`🚀 Nuvio Arabic running on http://localhost:${port}`);
-    });
+    app.listen(port, () => console.log(`🚀 Running on ${port}`));
 }
