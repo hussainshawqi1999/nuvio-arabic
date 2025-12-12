@@ -2,60 +2,52 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 
 const BASE_URL = "https://www.faselhds.biz";
+const PROXY_URL = process.env.PROXY_URL || "";
 
-const HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-    'Referer': BASE_URL,
-    'Origin': BASE_URL
-};
+async function fetchUrl(url) {
+    const target = PROXY_URL ? `${PROXY_URL}${encodeURIComponent(url)}` : url;
+    try {
+        const { data } = await axios.get(target);
+        return data;
+    } catch (e) { return null; }
+}
 
 async function getStream(query, type, season, episode) {
     try {
-        // 1. البحث
-        const { data } = await axios.get(`${BASE_URL}/?s=${encodeURIComponent(query)}`, { headers: HEADERS, timeout: 8000 });
-        const $ = cheerio.load(data);
-        
-        let pageUrl = null;
-        $('#postList .postDiv').each((i, el) => {
-            const title = $(el).find('.postTitle h3').text().trim();
-            if (title.includes(query)) {
-                pageUrl = $(el).find('a').attr('href');
-                return false;
-            }
-        });
+        const searchUrl = `${BASE_URL}/?s=${encodeURIComponent(query)}`;
+        const html = await fetchUrl(searchUrl);
+        if (!html) return null;
 
+        const $ = cheerio.load(html);
+        const pageUrl = $('#postList .postDiv a').first().attr('href');
+        
         if (!pageUrl) return null;
 
-        // 2. المسلسلات
         let targetUrl = pageUrl;
         if (type === 'series') {
-            const pageRes = await axios.get(pageUrl, { headers: HEADERS });
-            const $$ = cheerio.load(pageRes.data);
-            
-            const epLink = $$('#epAll a').filter((i, el) => {
-                return $(el).text().trim() == episode.toString();
-            }).attr('href');
-
-            if (!epLink) return null;
-            targetUrl = epLink;
+            const pageHtml = await fetchUrl(pageUrl);
+            if (pageHtml) {
+                const $$ = cheerio.load(pageHtml);
+                const epLink = $$('#epAll a').filter((i, el) => $$(el).text().trim() == episode.toString()).attr('href');
+                if (epLink) targetUrl = epLink;
+            }
         }
 
-        // 3. استخراج الرابط
-        const finalRes = await axios.get(targetUrl, { headers: HEADERS });
-        const $$$ = cheerio.load(finalRes.data);
+        const finalHtml = await fetchUrl(targetUrl);
+        if (!finalHtml) return null;
+        
+        const $$$ = cheerio.load(finalHtml);
         const iframeSrc = $$$('iframe[name="player_iframe"]').attr('src');
 
         if (iframeSrc) {
             return {
-                name: "FaselHD (HQ)",
+                name: "FaselHD",
                 title: `${query} [1080p]`,
                 url: iframeSrc,
                 behaviorHints: { notWebReady: true }
             };
         }
-
-    } catch (e) { console.log("⚠️ Fasel Error:", e.message); }
+    } catch (e) { }
     return null;
 }
-
 module.exports = { getStream };
