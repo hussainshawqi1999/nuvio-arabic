@@ -8,7 +8,7 @@ const PROXY_URL = process.env.PROXY_URL || "";
 
 const client = wrapper(axios.create({
     jar: new CookieJar(),
-    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0 Safari/537.36' },
+    headers: { 'User-Agent': 'Mozilla/5.0' },
     timeout: 15000
 }));
 
@@ -19,10 +19,8 @@ async function fetchUrl(url) {
 
 async function getStream(query, type, season, episode) {
     try {
-        const searchUrl = `${BASE_URL}/search/${encodeURIComponent(query)}`;
-        const html = await fetchUrl(searchUrl);
+        const html = await fetchUrl(`${BASE_URL}/search/${encodeURIComponent(query)}`);
         if (!html) return null;
-        
         const $ = cheerio.load(html);
         let pageUrl = null;
         $('.GridItem').each((i, el) => {
@@ -32,23 +30,20 @@ async function getStream(query, type, season, episode) {
 
         let targetUrl = pageUrl;
         if (type === 'series') {
-            const seriesHtml = await fetchUrl(pageUrl);
-            if (seriesHtml) {
-                const $$ = cheerio.load(seriesHtml);
-                const epUrl = $$('.EpisodesList a').filter((i, el) => {
-                    return $$(el).text().includes(episode.toString());
-                }).first().attr('href');
-                if (epUrl) targetUrl = epUrl;
+            const sHtml = await fetchUrl(pageUrl);
+            if (sHtml) {
+                const $$ = cheerio.load(sHtml);
+                const ep = $$('.EpisodesList a').filter((i,el) => $$(el).text().includes(episode)).attr('href');
+                if (ep) targetUrl = ep;
             }
         }
 
-        const pageHtml = await fetchUrl(targetUrl);
-        if (!pageHtml) return null;
-        const $$$ = cheerio.load(pageHtml);
-        const watchUrl = $$$('.WatchServersList ul li').first().attr('data-url') || $$$('iframe').attr('src');
-        
-        if (watchUrl) return { name: "WeCima", title: `${query}\nS${season}E${episode}`, url: watchUrl, behaviorHints: { notWebReady: true } };
-    } catch (e) { }
+        const pHtml = await fetchUrl(targetUrl);
+        if (!pHtml) return null;
+        const $$$ = cheerio.load(pHtml);
+        const watch = $$$('.WatchServersList ul li').first().attr('data-url');
+        if (watch) return { name: "WeCima", title: `${query} ${season?`S${season}E${episode}`:''}`, url: watch, behaviorHints: { notWebReady: true } };
+    } catch (e) {}
     return null;
 }
 module.exports = { getStream };
