@@ -1,7 +1,6 @@
 {
-  "name": "nuvio-arabic-akwam",
+  "name": "nuvio-arabic-rescue",
   "version": "5.0.0",
-  "description": "Arabic Stremio Addon (Akwam + WeCima + Fasel)",
   "main": "server.js",
   "engines": {
     "node": "20.x"
