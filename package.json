@@ -1,6 +1,7 @@
 {
-  "name": "nuvio-arabic-gold",
-  "version": "2.5.0",
+  "name": "nuvio-arabic-ultimate",
+  "version": "4.0.0",
+  "description": "Arabic Stremio Addon with Proxy Support",
   "main": "server.js",
   "engines": {
     "node": "20.x"
