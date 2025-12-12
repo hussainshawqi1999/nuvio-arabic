@@ -2,182 +2,164 @@ const express = require('express');
 const { addonBuilder } = require("stremio-addon-sdk");
 const cors = require('cors');
 const axios = require('axios');
-const { CookieJar } = require('tough-cookie');
-const { wrapper } = require('axios-cookiejar-support');
-const cheerio = require('cheerio');
+const path = require('path');
+
+// تحميل المزودات
+let wecima = null;
+let fasel = null;
+try {
+    wecima = require('./providers/wecima_pro');
+    fasel = require('./providers/fasel_pro');
+} catch (e) { console.error("Providers Error:", e.message); }
 
 const app = express();
 app.use(cors());
 
 const TMDB_KEY = "439c478a771f35c05022f9feabcca01c"; 
 
-// ==========================================
-// 1. نظام التمويه المتقدم (Stealth System)
-// ==========================================
-
-// هذه الهيدرات توهم السيرفر بأن الطلب قادم من متصفح Chrome 123 على ويندوز
-// بدلاً من سكربت Node.js
-const STEALTH_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-    'Accept-Language': 'ar,en-US;q=0.9,en;q=0.8',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Connection': 'keep-alive',
-    'Upgrade-Insecure-Requests': '1',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
-    'Sec-Fetch-User': '?1',
-    'Cache-Control': 'max-age=0',
-    'sec-ch-ua': '"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"',
-    'sec-ch-ua-mobile': '?0',
-    'sec-ch-ua-platform': '"Windows"'
-};
-
-// إنشاء "جرة كوكيز" لحفظ الجلسة (مهم جداً لتجاوز Cloudflare)
-const jar = new CookieJar();
-const client = wrapper(axios.create({
-    jar,
-    headers: STEALTH_HEADERS,
-    timeout: 9000, // مهلة 9 ثواني (أقل من حد فيرسل الـ 10 ثواني)
-    validateStatus: () => true // لا تفشل عند ظهور أخطاء 403/503 (لنتعامل معها يدوياً)
-}));
-
-// ==========================================
-// 2. المزودات (Providers)
-// ==========================================
-
-// --- WeCima (وي سيما) ---
-async function getWeCima(query, season, episode) {
-    const BASE_URL = "https://mycima.wecima.show"; // تأكد أن هذا الدومين يعمل عندك
-    console.log(`🕵️‍♂️ WeCima Hunting: ${query}`);
-
-    try {
-        // الخطوة 1: البحث مع هيدر Referer صحيح
-        const searchUrl = `${BASE_URL}/search/${encodeURIComponent(query)}`;
-        const res = await client.get(searchUrl, { 
-            headers: { ...STEALTH_HEADERS, 'Referer': BASE_URL } 
-        });
-
-        // تحقق من الحظر
-        if (res.status === 403 || res.status === 503) {
-            console.log("❌ WeCima Blocked Vercel IP (Cloudflare Challenge)");
-            return null;
+// --- صفحة التثبيت (Installer Page) ---
+const INSTALL_PAGE = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nuvio Arabic Ultimate</title>
+    <style>
+        body {
+            background-color: #0b0b0b;
+            color: #e1e1e1;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
         }
-
-        const $ = cheerio.load(res.data);
-        let pageUrl = null;
+        .container {
+            background: #161616;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+            border: 1px solid #333;
+        }
+        .logo {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #6a0dad, #a37dfc);
+            border-radius: 50%;
+            margin: 0 auto 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            font-weight: bold;
+            color: white;
+            box-shadow: 0 0 20px rgba(163, 125, 252, 0.4);
+        }
+        h1 { margin: 0 0 10px; color: #fff; font-size: 24px; }
+        p { color: #888; margin-bottom: 30px; line-height: 1.5; }
         
-        $('.GridItem').each((i, el) => {
-            const title = $(el).find('strong.Title').text().trim();
-            if (title.includes(query)) {
-                pageUrl = $(el).find('a').attr('href');
-                return false;
-            }
-        });
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 16px;
+            margin: 10px 0;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 16px;
+            transition: all 0.2s ease;
+            border: none;
+            cursor: pointer;
+            box-sizing: border-box;
+        }
+        .btn-install {
+            background: #a37dfc;
+            color: #0b0b0b;
+        }
+        .btn-install:hover {
+            background: #b595fd;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(163, 125, 252, 0.3);
+        }
+        .btn-copy {
+            background: #2a2a2a;
+            color: #ccc;
+        }
+        .btn-copy:hover {
+            background: #333;
+            color: #fff;
+        }
+        .features {
+            text-align: left;
+            margin-top: 30px;
+            background: #111;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 14px;
+            color: #aaa;
+        }
+        .features div { margin-bottom: 8px; }
+        .features span { color: #a37dfc; margin-right: 8px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">NA</div>
+        <h1>Nuvio Arabic Ultimate</h1>
+        <p>The best Arabic content experience for Stremio. Powered by WeCima & FaselHD.</p>
 
-        if (!pageUrl) return null;
+        <a id="installBtn" href="#" class="btn btn-install">🚀 Install Addon</a>
+        <button id="copyBtn" class="btn btn-copy" onclick="copyLink()">📋 Copy Manifest Link</button>
 
-        // الخطوة 2: الدخول لصفحة المسلسل/الحلقة
-        let targetUrl = pageUrl;
-        if (season && episode) {
-            // الدخول لصفحة المسلسل أولاً
-            const seriesRes = await client.get(pageUrl, { 
-                headers: { ...STEALTH_HEADERS, 'Referer': searchUrl } 
+        <div class="features">
+            <div><span>✓</span> Native Arabic Interface (TMDB)</div>
+            <div><span>✓</span> FaselHD (1080p) + WeCima (Auto)</div>
+            <div><span>✓</span> Proxy Support (Anti-Block)</div>
+        </div>
+    </div>
+
+    <script>
+        const host = window.location.host;
+        const protocol = window.location.protocol;
+        const manifestUrl = \`\${protocol}//\${host}/manifest.json\`;
+        
+        const stremioProto = protocol === 'https:' ? 'stremio:' : 'stremio:';
+        const installUrl = \`\${stremioProto}//\${host}/manifest.json\`;
+
+        document.getElementById('installBtn').href = installUrl;
+
+        function copyLink() {
+            navigator.clipboard.writeText(manifestUrl).then(() => {
+                const btn = document.getElementById('copyBtn');
+                const originalText = btn.innerText;
+                btn.innerText = "✅ Copied!";
+                btn.style.background = "#2ea043";
+                btn.style.color = "white";
+                setTimeout(() => {
+                    btn.innerText = originalText;
+                    btn.style.background = "#2a2a2a";
+                    btn.style.color = "#ccc";
+                }, 2000);
             });
-            const $$ = cheerio.load(seriesRes.data);
-            
-            // البحث عن الحلقة
-            const epLink = $$('.EpisodesList a').filter((i, el) => {
-                const txt = $$(el).text();
-                // بحث ذكي عن الرقم (مثلاً: "الحلقة 5" أو "5")
-                const nums = txt.match(/\d+/g);
-                return nums && nums.includes(episode.toString());
-            }).first().attr('href');
-
-            if (!epLink) return null;
-            targetUrl = epLink;
         }
+    </script>
+</body>
+</html>
+`;
 
-        // الخطوة 3: استخراج الفيديو
-        const pageRes = await client.get(targetUrl, { 
-            headers: { ...STEALTH_HEADERS, 'Referer': pageUrl } 
-        });
-        const $$$ = cheerio.load(pageRes.data);
-        
-        const watchUrl = $$$('.WatchServersList ul li').first().attr('data-url') || $$$('iframe').attr('src');
-        
-        if (watchUrl) {
-            return {
-                name: "WeCima",
-                title: `${query} \n ${season ? `S${season}E${episode}` : 'Movie'}`,
-                url: watchUrl,
-                behaviorHints: { notWebReady: true }
-            };
-        }
-    } catch (e) { console.log("⚠️ WeCima Error:", e.message); }
-    return null;
-}
-
-// --- FaselHD (فاصل) ---
-async function getFasel(query, season, episode) {
-    const BASE_URL = "https://www.faselhds.biz";
-    console.log(`🕵️‍♂️ Fasel Hunting: ${query}`);
-
-    try {
-        const searchUrl = `${BASE_URL}/?s=${encodeURIComponent(query)}`;
-        const res = await client.get(searchUrl, { 
-            headers: { ...STEALTH_HEADERS, 'Referer': BASE_URL } 
-        });
-
-        if (res.status === 403) {
-            console.log("❌ FaselHD Blocked Vercel IP");
-            return null;
-        }
-
-        const $ = cheerio.load(res.data);
-        const pageUrl = $('#postList .postDiv a').first().attr('href');
-        
-        if (!pageUrl) return null;
-
-        let targetUrl = pageUrl;
-        // منطق الحلقات في فاصل (غالباً تكون أزرار تحت المشغل)
-        if (season && episode) {
-             const pageRes = await client.get(pageUrl, { 
-                 headers: { ...STEALTH_HEADERS, 'Referer': searchUrl } 
-             });
-             const $$ = cheerio.load(pageRes.data);
-             const epLink = $$('#epAll a').filter((i, el) => $$(el).text().trim() == episode).attr('href');
-             if (epLink) targetUrl = epLink;
-        }
-
-        const finalRes = await client.get(targetUrl, { 
-            headers: { ...STEALTH_HEADERS, 'Referer': pageUrl } 
-        });
-        const $$$ = cheerio.load(finalRes.data);
-        const iframe = $$$('iframe[name="player_iframe"]').attr('src');
-
-        if (iframe) {
-            return {
-                name: "FaselHD",
-                title: `${query} [1080p]`,
-                url: iframe,
-                behaviorHints: { notWebReady: true }
-            };
-        }
-    } catch (e) { console.log("⚠️ Fasel Error:", e.message); }
-    return null;
-}
-
-// ==========================================
-// 3. إعداد الإضافة (Stremio SDK)
-// ==========================================
-
+// --- تعريف الإضافة ---
 const builder = new addonBuilder({
-    id: "org.nuvio.arabic.stealth",
-    version: "3.5.0",
-    name: "Nuvio Arabic (Stealth)",
-    description: "أفلام ومسلسلات عربية (Vercel Edition)",
+    id: "org.nuvio.arabic.ultimate",
+    version: "4.0.0",
+    name: "Nuvio Arabic Ultimate",
+    description: "Arabic Movies & Series (WeCima + FaselHD)",
     resources: ["catalog", "stream"],
     types: ["movie", "series"],
     idPrefixes: ["tt", "tmdb"],
@@ -187,31 +169,33 @@ const builder = new addonBuilder({
     ]
 });
 
-// الكتالوج
+// --- 1. الكتالوج (عربي فقط) ---
 builder.defineCatalogHandler(async ({ type, id }) => {
     const tmdbType = type === 'series' ? 'tv' : 'movie';
     const url = `https://api.themoviedb.org/3/discover/${tmdbType}?api_key=${TMDB_KEY}&with_original_language=ar&sort_by=popularity.desc&page=1`;
     try {
-        const { data } = await axios.get(url, { timeout: 3000 });
+        const { data } = await axios.get(url, { timeout: 5000 });
         const metas = data.results.map(item => ({
             id: `tmdb:${item.id}`,
             type: type,
             name: item.name || item.title || item.original_name,
             poster: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null,
-            description: item.overview
+            description: item.overview,
+            releaseInfo: (item.first_air_date || item.release_date || '').split('-')[0]
         }));
         return { metas };
     } catch (e) { return { metas: [] }; }
 });
 
-// التشغيل
+// --- 2. الستريم (البحث) ---
 builder.defineStreamHandler(async ({ type, id }) => {
-    let tmdbId = id.split(':')[1];
-    let season = null;
-    let episode = null;
+    console.log(`🚀 Stream Request: ${id}`);
+    
+    let tmdbId = id;
+    let season = 1;
+    let episode = 1;
 
-    if (id.startsWith('tt')) return { streams: [] };
-
+    if (id.startsWith('tmdb:')) tmdbId = id.split(':')[1];
     if (type === 'series' && id.includes(':')) {
         const parts = id.split(':');
         tmdbId = parts[1];
@@ -224,23 +208,23 @@ builder.defineStreamHandler(async ({ type, id }) => {
         const tmdbType = type === 'series' ? 'tv' : 'movie';
         const { data } = await axios.get(`https://api.themoviedb.org/3/${tmdbType}/${tmdbId}?api_key=${TMDB_KEY}&language=ar-SA`, { timeout: 3000 });
         queryName = data.original_name || data.original_title || data.name || data.title;
-        console.log(`🔍 Searching: ${queryName}`);
+        console.log(`🔎 Searching: ${queryName}`);
     } catch (e) { return { streams: [] }; }
 
-    // تشغيل البحث بالتوازي (الأسرع يفوز)
-    const [wecima, fasel] = await Promise.all([
-        getWeCima(queryName, season, episode),
-        getFasel(queryName, season, episode)
-    ]);
-
     const streams = [];
-    if (fasel) streams.push(fasel);
-    if (wecima) streams.push(wecima);
+    const promises = [];
+
+    // البحث في المزودات بالتوازي
+    if (fasel) promises.push(fasel.getStream(queryName, type, season, episode).catch(e => null));
+    if (wecima) promises.push(wecima.getStream(queryName, type, season, episode).catch(e => null));
+
+    const results = await Promise.all(promises);
+    results.forEach(res => { if (res) streams.push(res); });
 
     if (streams.length === 0) {
         streams.push({
             name: "Info",
-            title: "❌ Blocked by Cloudflare (Try Localhost)",
+            title: "❌ No links found / Blocked (Check Proxy)",
             url: "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
         });
     }
@@ -250,43 +234,20 @@ builder.defineStreamHandler(async ({ type, id }) => {
 
 const addonInterface = builder.getInterface();
 
-// صفحة الهبوط
-const LANDING_HTML = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Nuvio Arabic Stealth</title>
-<style>
-body{background:#0f0f13;color:#fff;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0}
-.box{background:#1a1a1f;padding:40px;border-radius:15px;text-align:center;border:1px solid #333}
-a{display:inline-block;background:#a37dfc;color:#fff;padding:12px 25px;text-decoration:none;border-radius:8px;font-weight:bold;margin-top:20px}
-</style>
-</head>
-<body>
-<div class="box">
-<h1>Nuvio Arabic (Vercel Edition)</h1>
-<p>محاولة تخطي الحجب عبر التمويه</p>
-<a id="install" href="#">Install Addon</a>
-</div>
-<script>
-const proto = window.location.protocol.replace('http','stremio');
-document.getElementById('install').href = \`\${proto}//\${window.location.host}/manifest.json\`;
-</script>
-</body>
-</html>
-`;
+// --- الروابط ---
+app.get('/', (req, res) => res.send(INSTALL_PAGE));
 
-app.get('/', (req, res) => res.send(LANDING_HTML));
 app.get('/manifest.json', (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json(addonInterface.manifest);
 });
+
 app.get('/catalog/:type/:id.json', async (req, res) => {
     const resp = await addonInterface.catalog(req.params);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json(resp);
 });
+
 app.get('/stream/:type/:id.json', async (req, res) => {
     const resp = await addonInterface.stream(req.params);
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -294,5 +255,8 @@ app.get('/stream/:type/:id.json', async (req, res) => {
 });
 
 const port = process.env.PORT || 7000;
-if (process.env.VERCEL) module.exports = app;
-else app.listen(port, () => console.log(`Running on ${port}`));
+if (process.env.VERCEL) {
+    module.exports = app;
+} else {
+    app.listen(port, () => console.log(`🚀 Running on http://localhost:${port}`));
+}
