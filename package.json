@@ -1,7 +1,7 @@
 {
-  "name": "nuvio-arabic-gold",
-  "version": "4.0.0",
-  "description": "Arabic Stremio Addon",
+  "name": "nuvio-arabic-akwam",
+  "version": "5.0.0",
+  "description": "Arabic Stremio Addon (Akwam + WeCima + Fasel)",
   "main": "server.js",
   "engines": {
     "node": "20.x"
