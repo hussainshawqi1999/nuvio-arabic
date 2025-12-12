@@ -1,6 +1,5 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
-
 const BASE_URL = "https://www.faselhds.biz";
 const PROXY_URL = process.env.PROXY_URL || "";
 
@@ -19,21 +18,20 @@ async function getStream(query, type, season, episode) {
 
         let targetUrl = pageUrl;
         if (type === 'series') {
-            const pageHtml = await fetchUrl(pageUrl);
-            if (pageHtml) {
-                const $$ = cheerio.load(pageHtml);
-                const epLink = $$('#epAll a').filter((i, el) => $$(el).text().trim() == episode).attr('href');
-                if (epLink) targetUrl = epLink;
+            const pHtml = await fetchUrl(pageUrl);
+            if (pHtml) {
+                const $$ = cheerio.load(pHtml);
+                const ep = $$('#epAll a').filter((i,el) => $$(el).text().trim() == episode).attr('href');
+                if (ep) targetUrl = ep;
             }
         }
 
-        const finalHtml = await fetchUrl(targetUrl);
-        if (!finalHtml) return null;
-        const $$$ = cheerio.load(finalHtml);
+        const fHtml = await fetchUrl(targetUrl);
+        if (!fHtml) return null;
+        const $$$ = cheerio.load(fHtml);
         const iframe = $$$('iframe[name="player_iframe"]').attr('src');
-
-        if (iframe) return { name: "FaselHD", title: `${query} [1080p]`, url: iframe, behaviorHints: { notWebReady: true } };
-    } catch (e) { }
+        if (iframe) return { name: "FaselHD", title: `${query}`, url: iframe, behaviorHints: { notWebReady: true } };
+    } catch (e) {}
     return null;
 }
 module.exports = { getStream };
