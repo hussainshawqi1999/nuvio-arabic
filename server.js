@@ -6,61 +6,26 @@ const axios = require('axios');
 // تحميل المزودات
 let wecima = null;
 let fasel = null;
-let akwam = null; // الجديد
+let akwam = null;
 
 try {
     wecima = require('./providers/wecima_pro');
     fasel = require('./providers/fasel_pro');
-    akwam = require('./providers/akwam_pro'); // استيراد أكوام
-} catch (e) { console.error("Providers Error:", e.message); }
+    akwam = require('./providers/akwam_pro');
+    console.log("✅ Providers Loaded Successfully");
+} catch (e) { console.error("⚠️ Providers Error:", e.message); }
 
 const app = express();
 app.use(cors());
 
 const TMDB_KEY = "439c478a771f35c05022f9feabcca01c"; 
 
-// --- صفحة التثبيت (Installer) ---
-const INSTALL_PAGE = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nuvio Arabic Ultimate</title>
-    <style>
-        body { background: #0b0b0b; color: #e1e1e1; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
-        .container { background: #161616; padding: 40px; border-radius: 12px; text-align: center; max-width: 500px; width: 100%; border: 1px solid #333; }
-        h1 { color: #a37dfc; margin-bottom: 10px; }
-        .btn { display: block; width: 100%; padding: 15px; margin: 10px 0; border-radius: 8px; text-decoration: none; font-weight: bold; background: #a37dfc; color: #000; }
-        .features span { color: #a37dfc; margin-right: 5px; }
-        .features { text-align: left; margin-top: 20px; color: #aaa; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Nuvio Arabic Ultimate</h1>
-        <p>Akwam + WeCima + FaselHD</p>
-        <a id="installBtn" href="#" class="btn">🚀 Install Addon</a>
-        <div class="features">
-            <div><span>✓</span> Akwam (Direct Links)</div>
-            <div><span>✓</span> FaselHD (1080p)</div>
-            <div><span>✓</span> WeCima (Auto)</div>
-        </div>
-    </div>
-    <script>
-        const installUrl = window.location.href.replace(/^http/, 'stremio') + 'manifest.json';
-        document.getElementById('installBtn').href = installUrl;
-    </script>
-</body>
-</html>
-`;
-
 // --- إعداد الإضافة ---
 const builder = new addonBuilder({
     id: "org.nuvio.arabic.akwam",
-    version: "4.5.0",
-    name: "Nuvio Arabic (Akwam Edition)",
-    description: "Arabic Content (Akwam + WeCima + FaselHD)",
+    version: "5.0.0",
+    name: "Nuvio Arabic Ultimate",
+    description: "Akwam (Python Logic) + WeCima + FaselHD",
     resources: ["catalog", "stream"],
     types: ["movie", "series"],
     idPrefixes: ["tt", "tmdb"],
@@ -87,9 +52,9 @@ builder.defineCatalogHandler(async ({ type, id }) => {
     } catch (e) { return { metas: [] }; }
 });
 
-// الستريم (البحث في 3 مصادر)
+// الستريم
 builder.defineStreamHandler(async ({ type, id }) => {
-    console.log(`🚀 Stream Request: ${id}`);
+    console.log(`🚀 Request: ${id}`);
     
     let tmdbId = id;
     let season = 1;
@@ -114,10 +79,10 @@ builder.defineStreamHandler(async ({ type, id }) => {
     const streams = [];
     const promises = [];
 
-    // إضافة المصادر الثلاثة
-    if (akwam) promises.push(akwam.getStream(queryName, type, season, episode).catch(e => null));
-    if (fasel) promises.push(fasel.getStream(queryName, type, season, episode).catch(e => null));
-    if (wecima) promises.push(wecima.getStream(queryName, type, season, episode).catch(e => null));
+    // البحث في المزودات (مع معالجة الأخطاء لكل واحد)
+    if (akwam) promises.push(akwam.getStream(queryName, type, season, episode).catch(e => console.log('Akwam Fail:', e.message)));
+    if (fasel) promises.push(fasel.getStream(queryName, type, season, episode).catch(e => console.log('Fasel Fail:', e.message)));
+    if (wecima) promises.push(wecima.getStream(queryName, type, season, episode).catch(e => console.log('WeCima Fail:', e.message)));
 
     const results = await Promise.all(promises);
     results.forEach(res => { if (res) streams.push(res); });
@@ -135,20 +100,28 @@ builder.defineStreamHandler(async ({ type, id }) => {
 
 const addonInterface = builder.getInterface();
 
-// الروابط
-app.get('/', (req, res) => res.send(INSTALL_PAGE));
+// صفحة التثبيت
+app.get('/', (req, res) => {
+    const installUrl = `${req.protocol}://${req.get('host')}/manifest.json`;
+    const stremioUrl = installUrl.replace(/^http/, 'stremio');
+    res.send(`
+        <body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding:50px">
+            <h1>Nuvio Arabic (Akwam Edition)</h1>
+            <a href="${stremioUrl}" style="background:#a37dfc;color:#fff;padding:15px;text-decoration:none;border-radius:5px">🚀 Install in Stremio</a>
+        </body>
+    `);
+});
+
 app.get('/manifest.json', (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json(addonInterface.manifest);
 });
 app.get('/catalog/:type/:id.json', async (req, res) => {
     const resp = await addonInterface.catalog(req.params);
-    res.setHeader('Access-Control-Allow-Origin', '*');
     res.json(resp);
 });
 app.get('/stream/:type/:id.json', async (req, res) => {
     const resp = await addonInterface.stream(req.params);
-    res.setHeader('Access-Control-Allow-Origin', '*');
     res.json(resp);
 });
 
